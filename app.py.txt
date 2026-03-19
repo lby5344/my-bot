@@ -1,0 +1,163 @@
+%%writefile app.py
+import streamlit as st
+import ccxt
+import pandas as pd
+import pandas_ta as ta
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from datetime import datetime
+import plotly.graph_objects as go
+
+st.set_page_config(page_title="다중 타임프레임 AI 참모 v2.0", page_icon="🤖", layout="wide")
+
+st.markdown("""
+<style>
+div[data-testid="stMetricValue"] { font-size: 2.2rem; font-weight: 700; }
+div[data-testid="stMetricLabel"] { font-size: 1.1rem; color: #a0a0a0; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🤖 다중 타임프레임 AI 참모 v2.0")
+st.markdown("트레이딩뷰 차트 시간에 맞춰 아래 **버튼**을 클릭하세요!")
+
+@st.cache_data(ttl=60)
+def get_data_and_predict(tf):
+    exchange = ccxt.kraken()
+    raw_data = exchange.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=1000)
+    df = pd.DataFrame(raw_data, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
+
+    df.ta.atr(length=14, append=True)
+    df.ta.macd(fast=12, slow=26, signal=9, append=True)
+    df.ta.rsi(length=14, append=True)
+
+    df['River'] = ta.ema(df['MACDh_12_26_9'], length=5)
+    df['River_Slope'] = df['River'] - df['River'].shift(1)
+    df['River_Accel'] = df['River_Slope'] - df['River_Slope'].shift(1)
+
+    df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+
+    feature_cols = ['ATRr_14', 'MACDh_12_26_9', 'RSI_14', 'Volume', 'River', 'River_Slope', 'River_Accel']
+
+    live_data = df.iloc[-1:]
+    df_train = df.dropna()
+
+    X_train = df_train[feature_cols]
+    y_train = df_train['Target']
+
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    importances = model.feature_importances_
+    feature_importance_df = pd.DataFrame({
+        '지표 (Feature)': feature_cols,
+        '중요도 (Importance)': importances
+    }).sort_values(by='중요도 (Importance)', ascending=False)
+
+    X_live = live_data[feature_cols]
+    live_prob = model.predict_proba(X_live)[0]
+
+    return live_data['Close'].iloc[0], live_data['Date'].iloc[0], live_prob[1]*100, live_prob[0]*100, feature_importance_df, live_data.to_dict('records')[0]
+
+st.write("---")
+col1, col2, col3 = st.columns(3)
+
+tf_to_run = None
+tf_name = ""
+
+with col1:
+    if st.button("🔄 1시간 (1h)", use_container_width=True):
+        tf_to_run = '1h'; tf_name = '1시간'
+with col2:
+    if st.button("🔄 4시간 (4h)", use_container_width=True):
+        tf_to_run = '4h'; tf_name = '4시간'
+with col3:
+    if st.button("🔄 1일 (1d)", use_container_width=True):
+        tf_to_run = '1d'; tf_name = '1일'
+
+if tf_to_run:
+    with st.spinner(f'AI가 {tf_name} 차트 패턴을 실시간 분석 중입니다...'):
+        current_price, latest_time, up_prob, down_prob, importance_df, latest_bar = get_data_and_predict(tf_to_run)
+
+        st.write("---")
+        st.subheader(f"업데이트: {latest_time.strftime('%Y-%m-%d %H:%M')} (KST)")
+
+        summary_cols = st.columns(3)
+        with summary_cols[0]:
+            st.metric(label="💰 현재 BTC 가격", value=f"{current_price:,.2f} USDT")
+        with summary_cols[1]:
+            st.metric(label=f"📈 다음 {tf_name} 상승 확률", value=f"{up_prob:.1f}%")
+        with summary_cols[2]:
+            st.metric(label=f"📉 다음 {tf_name} 하락 확률", value=f"{down_prob:.1f}%")
+
+        st.write("---")
+        briefing_cols = st.columns([1.5, 2.5])
+
+        with briefing_cols[0]:
+            st.subheader("❄️ 최종 브리핑")
+
+            # 💡 핵심 수정: 복사/붙여넣기 시 텍스트가 쪼개져도 에러가 나지 않도록 괄호()로 묶어서 조립했습니다.
+            if up_prob >= 60:
+                msg = (
+                    f"🔥 **[강력 매수 권장]**\n\n"
+                    f"현재 {tf_name} 상승 확률은 **{up_prob:.1f}%**, 하락 확률은 **{down_prob:.1f}%** 입니다.\n\n"
+                    f"➔ {tf_name} 차트 🟢 확인 후 진입하세요."
+                )
+                st.success(msg)
+            elif down_prob >= 60:
+                msg = (
+                    f"❄️ **[강력 매도 권장]**\n\n"
+                    f"현재 {tf_name} 하락 확률은 **{down_prob:.1f}%**, 상승 확률은 **{up_prob:.1f}%** 입니다.\n\n"
+                    f"➔ {tf_name} 차트 🔴 확인 후 진입하세요."
+                )
+                st.error(msg)
+            else:
+                msg = (
+                    f"⚠️ **[관망 추천]**\n\n"
+                    f"현재 {tf_name} 상승 확률은 **{up_prob:.1f}%**, 하락 확률은 **{down_prob:.1f}%** 입니다.\n\n"
+                    f"방향성이 불확실하니(휩소 주의) 진입을 보류하십시오."
+                )
+                st.warning(msg)
+
+        with briefing_cols[1]:
+            st.subheader(f"📊 {tf_name} 상세 지표 상태 (최신 캔들)")
+            rsi = latest_bar['RSI_14']
+            rsi_status = "과매수" if rsi >= 70 else "과매도" if rsi <= 30 else "중립"
+            macd = latest_bar['MACDh_12_26_9']
+            macd_status = "상승추세" if macd >= 0 else "하락추세"
+            vol = latest_bar['Volume']
+
+            status_data = pd.DataFrame({
+                '지표 (Indicator)': ['RSI (14)', 'MACD Hist', 'ATR (14)', 'Volume'],
+                '현재 값 (Value)': [f"{rsi:.2f}", f"{macd:.2f}", f"{latest_bar['ATRr_14']:.2f}", f"{vol:,.0f}"],
+                '상태/신호 (Status)': [rsi_status, macd_status, "Neutral", "High" if vol > 1000 else "Neutral"]
+            })
+
+            def color_status(row):
+                if row['지표 (Indicator)'] == 'RSI (14)':
+                    if "과매수" in row['상태/신호 (Status)']: return ['color: #ff4b4b; font-weight: bold;'] * len(row)
+                    elif "과매도" in row['상태/신호 (Status)']: return ['color: #00e676; font-weight: bold;'] * len(row)
+                elif row['지표 (Indicator)'] == 'MACD Hist':
+                    if "상승추세" in row['상태/신호 (Status)']: return ['color: #00e676; font-weight: bold;'] * len(row)
+                    elif "하락추세" in row['상태/신호 (Status)']: return ['color: #ff4b4b; font-weight: bold;'] * len(row)
+                return ['color: white;'] * len(row)
+
+            styled_table = status_data.style.apply(color_status, axis=1)
+            st.dataframe(styled_table, use_container_width=True, hide_index=True)
+
+        st.write("---")
+        st.subheader("📊 Feature Importance (판단 근거)")
+
+        fig = go.Figure(go.Bar(
+            x=importance_df['중요도 (Importance)'],
+            y=importance_df['지표 (Feature)'],
+            orientation='h',
+            marker=dict(color=importance_df['중요도 (Importance)'], colorscale='Blues_r')
+        ))
+
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white'), xaxis=dict(title='중요도 (Importance)'),
+            yaxis=dict(autorange="reversed"), margin=dict(l=20, r=20, t=20, b=20), height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
