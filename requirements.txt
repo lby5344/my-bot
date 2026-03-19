@@ -1,3 +1,6 @@
 streamlit
-google-generativeai
-Pillow
+ccxt
+pandas
+pandas_ta
+scikit-learn
+plotly
