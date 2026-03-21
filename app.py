@@ -5,11 +5,11 @@ import numpy as np
 from xgboost import XGBRegressor
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import google.generativeai as genai  # 구글 공식 엔진 도입!
+import google.generativeai as genai
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="AI 참모 v3.8 (공식엔진)", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="AI 참모 v3.9 (2026 최적화)", page_icon="🧠", layout="wide")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
@@ -46,35 +46,42 @@ def predict_next_price(df):
     model.fit(X, y)
     return model.predict(np.array([[len(df)]]))[0]
 
-# 4. 제미나이 공식 엔진 브리핑
+# 4. 제미나이 브리핑 (2026년형 자동 모델 매칭)
 def get_ai_briefing(df, pred, tf_name):
-    # Secrets 키 이름 확인 (대소문자/띄어쓰기 주의!)
     try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)
+        if "GEMINI_API_KEY" not in st.secrets:
+            return "❌ Secrets에 'GEMINI_API_KEY'를 넣어주세요."
+            
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 모델 설정 (가장 안정적인 1.5-flash 사용)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # [2026년 대응] 시도해볼 모델 명칭 리스트
+        # 1.5-flash가 안되면 2.0-flash나 일반 pro로 넘어갑니다.
+        model_names = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro']
         
         latest = df.iloc[-1]
-        prompt = f"""
-        당신은 전문 투자 참모입니다.
-        - 타임프레임: {tf_name}
-        - 현재가: ${latest['Close']:,.1f}
-        - AI예측가: ${pred:,.1f}
-        - RSI: {latest['RSI']:.1f}
-        마누라님께 딱 3줄로 친절하게 투자 전략을 브리핑하세요.
-        """
+        prompt = f"비트코인 {tf_name} 기준 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$, RSI {latest['RSI']:.1f}. 친절하게 3줄 전략 짜줘."
         
-        response = model.generate_content(prompt)
-        return response.text
-    except KeyError:
-        return "❌ [에러] 스트림릿 Secrets에 'GEMINI_API_KEY'라는 이름이 없습니다."
+        response_text = ""
+        for m_name in model_names:
+            try:
+                model = genai.GenerativeModel(m_name)
+                response = model.generate_content(prompt)
+                response_text = response.text
+                if response_text:
+                    break # 성공하면 탈출!
+            except:
+                continue # 실패하면 다음 모델로
+        
+        if not response_text:
+            return "❌ [404 해결불가] 구글 서버에서 사용 가능한 모델을 찾지 못했습니다. API 키 권한을 확인해 주세요."
+            
+        return response_text
+        
     except Exception as e:
-        return f"❌ [공식 엔진 에러] {str(e)}"
+        return f"❌ [오류 발생] {str(e)}"
 
-# 5. UI 구성
-st.title("🧠 AI 비트코인 참모 v3.8")
+# 5. UI 구성 (생략 없이 전체 포함)
+st.title("🧠 AI 비트코인 참모 v3.9")
 st.subheader(f"🕒 현재 시간(KST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
@@ -93,7 +100,6 @@ if df is not None:
     m2.metric(f"{st.session_state.tf_name} 후 예측", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
     m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
-    # 브리핑 출력
     st.info(f"💬 **AI 참모 실시간 브리핑**\n\n{get_ai_briefing(df, pred, st.session_state.tf_name)}")
     
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
