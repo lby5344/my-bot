@@ -12,15 +12,15 @@ st.set_page_config(page_title="AI 참모 v3.1 (XGBoost Lite)", page_icon="⚡")
 st.title("🧠 AI 비트코인 참모 v3.1")
 st.subheader("실전 압축형 XGBoost 엔진 탑재")
 
-# 1. 데이터 가져오기 (바이낸스)
+# 1. 데이터 가져오기 (업비트 - 한국에서 가장 안정적!)
 @st.cache_data(ttl=600)
 def get_data():
-    exchange = ccxt.binance()
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=200)
+    # 바이낸스 대신 업비트로 교체!
+    exchange = ccxt.upbit() 
+    ohlcv = exchange.fetch_ohlcv('BTC/KRW', timeframe='1h', limit=200)
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
-
 try:
     df = get_data()
 
