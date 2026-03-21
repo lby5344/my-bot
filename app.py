@@ -19,21 +19,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. 데이터 가져오기 (Bybit 사용 - 달러 기준)
-@st.cache_data(ttl=300)
+# 2. 데이터 가져오기 (Bybit 사용 - 속도 제한 방어막 추가)
+@st.cache_data(ttl=900) # 15분 동안은 다시 요청 안 하고 기억함
 def get_analysis_data(tf):
-    # 바이낸스 대신 차단 없는 바이비트 사용
-    ex = ccxt.bybit()
-    ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=200)
-    df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9) # KST
-    
-    # RSI 계산
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    return df.dropna()
+    try:
+        ex = ccxt.bybit({'enableRateLimit': True})
+        ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=200)
+        df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
+        
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        return df.dropna()
+    except Exception as e:
+        st.error("⚠️ 거래소 접속이 너무 많습니다. 1~2분 뒤에 다시 시도해 주세요.")
+        return None
 
 # 3. XGBoost 예측
 def predict_next_price(df):
