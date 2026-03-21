@@ -22,12 +22,11 @@ st.markdown("""
 @st.cache_data(ttl=300)
 def get_analysis_data(tf):
     ex = ccxt.upbit()
-    # 각 시간대별로 넉넉하게 200개씩 가져오기
     ohlcv = ex.fetch_ohlcv('BTC/KRW', timeframe=tf, limit=200)
     df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9) # KST 보정
     
-    # 간단한 보조지표 추가 (RSI)
+    # RSI 계산
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -36,26 +35,24 @@ def get_analysis_data(tf):
     
     return df.dropna()
 
-# 3. XGBoost 학습 및 예측 함수
+# 3. XGBoost 학습 및 예측 함수 (대소문자 수정 완료!)
 def predict_next_price(df):
-    # 학습 데이터 준비 (현재 흐름으로 다음 종가 맞추기)
     df_train = df.copy()
-    df_train['target'] = df_train['close'].shift(-1)
+    # [수정] close -> Close (대문자로 변경)
+    df_train['target'] = df_train['Close'].shift(-1)
     df_train = df_train.dropna()
     
-    # 시간 순서를 숫자로 변환해서 학습
     X = np.array(range(len(df_train))).reshape(-1, 1)
-    y = df_train['close']
+    y = df_train['Close'] # [수정] 여기도 대문자 Close
     
     model = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=5)
     model.fit(X, y)
     
-    # 바로 다음 캔들 예측
     next_idx = np.array([[len(df)]])
     pred = model.predict(next_idx)[0]
     return pred
 
-# 4. 제미나이 브리핑 함수 (금고에서 키 가져오기)
+# 4. 제미나이 브리핑 함수
 def get_ai_briefing(df, pred, tf_name):
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
@@ -84,18 +81,27 @@ st.write("---")
 
 # 상단 시간대 선택 버튼
 col_btn1, col_btn2, col_btn3 = st.columns(3)
-selected_tf = "1h" # 기본값
+selected_tf = "1h"
 tf_display = "1시간"
 
+# 버튼 클릭 시 세션 상태에 저장 (버튼 누르면 화면이 새로고침되므로 상태 저장이 필요합니다)
+if 'tf' not in st.session_state:
+    st.session_state.tf = "1h"
+    st.session_state.tf_name = "1시간"
+
 if col_btn1.button("🔄 1시간 분석", use_container_width=True):
-    selected_tf = "1h"
-    tf_display = "1시간"
+    st.session_state.tf = "1h"
+    st.session_state.tf_name = "1시간"
 if col_btn2.button("🔄 4시간 분석", use_container_width=True):
-    selected_tf = "4h"
-    tf_display = "4시간"
+    st.session_state.tf = "4h"
+    st.session_state.tf_name = "4시간"
 if col_btn3.button("🔄 1일 분석", use_container_width=True):
-    selected_tf = "1d"
-    tf_display = "1일"
+    st.session_state.tf = "1d"
+    st.session_state.tf_name = "1일"
+
+# 최종 선택된 값 사용
+selected_tf = st.session_state.tf
+tf_display = st.session_state.tf_name
 
 # 데이터 처리 및 출력
 with st.spinner(f'{tf_display} 흐름을 분석하는 중...'):
@@ -118,12 +124,10 @@ with st.spinner(f'{tf_display} 흐름을 분석하는 중...'):
     
     # 차트 그리기
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-    # 캔들차트
     fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='BTC'), row=1, col=1)
-    # RSI
     fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', line=dict(color='#00ffbb')), row=2, col=1)
-    fig.add_hrect(y0=70, y1=100, fillcolor="red", opacity=0.1, row=2, col=1) # 과매수 구간
-    fig.add_hrect(y0=0, y1=30, fillcolor="blue", opacity=0.1, row=2, col=1) # 과매도 구간
+    fig.add_hrect(y0=70, y1=100, fillcolor="red", opacity=0.1, row=2, col=1)
+    fig.add_hrect(y0=0, y1=30, fillcolor="blue", opacity=0.1, row=2, col=1)
     
     fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=600)
     st.plotly_chart(fig, use_container_width=True)
