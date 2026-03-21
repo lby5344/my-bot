@@ -9,7 +9,7 @@ import requests
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="AI 참모 v3.6 (최종)", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="AI 참모 v3.7 (마지막 승부)", page_icon="🧠", layout="wide")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
@@ -47,39 +47,41 @@ def predict_next_price(df):
     model.fit(X, y)
     return model.predict(np.array([[len(df)]]))[0]
 
-# 4. 제미나이 브리핑 (주소 및 모델명 정식버전 교체)
+# 4. 제미나이 브리핑 (멀티 엔드포인트 자동 시도)
 def get_ai_briefing(df, pred, tf_name):
     if "GEMINI_API_KEY" not in st.secrets:
-        return "❌ [에러] 스트림릿 Secrets에 API 키를 등록해 주세요!"
+        return "❌ Secrets에 'GEMINI_API_KEY'를 넣어주세요."
     
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        latest = df.iloc[-1]
-        prompt = f"당신은 암호화폐 참모입니다. BTC {tf_name} 기준, 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$. 짧고 친절하게 3줄 전략 짜줘."
-        
-        # [수정 포인트] v1beta -> v1 으로 주소 변경
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
-        headers = {'Content-Type': 'application/json'}
-        data = {"contents": [{"parts": [{"text": prompt}]}]}
-        
-        res = requests.post(url, headers=headers, json=data)
-        
-        if res.status_code == 200:
-            return res.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-            # 주소가 틀렸을 때를 대비해 v1beta로 한번 더 시도 (보험)
-            url_beta = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            res_beta = requests.post(url_beta, headers=headers, json=data)
-            if res_beta.status_code == 200:
-                return res_beta.json()['candidates'][0]['content']['parts'][0]['text']
-            return f"❌ [에러 코드: {res.status_code}] 브리핑을 가져올 수 없습니다. API 키를 다시 확인해 주세요."
+    api_key = st.secrets["GEMINI_API_KEY"]
+    latest = df.iloc[-1]
+    prompt = f"비트코인 {tf_name} 기준, 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$. 짧게 3줄 전략 짜줘."
+    
+    # [핵심] 시도해볼 모델 후보 리스트 (2026년 기준 최신순)
+    models_to_try = [
+        "v1beta/models/gemini-1.5-flash",
+        "v1/models/gemini-1.5-flash",
+        "v1beta/models/gemini-1.5-pro",
+        "v1beta/models/gemini-pro"
+    ]
+    
+    last_error = ""
+    for model_path in models_to_try:
+        try:
+            url = f"https://generativelanguage.googleapis.com/{model_path}:generateContent?key={api_key}"
+            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
             
-    except Exception as e:
-        return f"❌ [오류] {str(e)}"
+            if res.status_code == 200:
+                return res.json()['candidates'][0]['content']['parts'][0]['text']
+            else:
+                last_error = f"{model_path} 실패({res.status_code})"
+                continue # 다음 모델로 시도
+        except:
+            continue
+            
+    return f"❌ 모든 모델 접속 실패. ({last_error}) API 키가 'Generative Language API' 권한이 있는지 확인이 필요합니다."
 
 # 5. UI 구성
-st.title("🧠 AI 비트코인 참모 v3.6")
+st.title("🧠 AI 비트코인 참모 v3.7")
 st.subheader(f"🕒 현재 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
@@ -93,11 +95,12 @@ if df is not None:
     pred = predict_next_price(df)
     cur = df['Close'].iloc[-1]
     
-    col_res1, col_res2, col_res3 = st.columns(3)
-    col_res1.metric("현재가", f"${cur:,.1f}")
-    col_res2.metric(f"{st.session_state.tf_name} 후 예측", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
-    col_res3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("현재가", f"${cur:,.1f}")
+    m2.metric(f"{st.session_state.tf_name} 후 예측", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
+    m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
+    # 💬 브리핑 영역
     st.info(f"💬 **AI 참모 실시간 브리핑**\n\n{get_ai_briefing(df, pred, st.session_state.tf_name)}")
     
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
