@@ -2,182 +2,60 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
+from xgboost import XGBRegressor
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import requests
-from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
-import os
+from datetime import datetime
 
-# 1. 스트림릿 금고에서 API 키 불러오기
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+# 페이지 설정
+st.set_page_config(page_title="AI 참모 v3.1 (XGBoost Lite)", page_icon="⚡")
 
-# 2. 페이지 설정 (v3.0 타이틀 적용)
-st.set_page_config(page_title="AI 참모 v3.0 (LSTM 딥러닝 탑재)", page_icon="🧠", layout="wide")
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
-    html, body, [data-testid="stSidebar"], p, h1, h2, h3, h4, div { font-family: 'Nanum Gothic', sans-serif !important; }
-    div[data-testid="stMetricValue"] { font-size: 2.5rem; font-weight: 700; color: #ff00ff; }
-</style>
-""", unsafe_allow_html=True)
+st.title("🧠 AI 비트코인 참모 v3.1")
+st.subheader("실전 압축형 XGBoost 엔진 탑재")
 
-# 🧠 [신규] 딥러닝 모델(뇌 파일) 불러오기
-@st.cache_resource
-def load_ai_brain():
-    model_path = 'ai_trader_lstm.h5'
-    if os.path.exists(model_path):
-        return load_model(model_path)
-    else:
-        return None
-
-# 3. AI 브리핑 함수
-def get_safe_ai_briefing(df, up, down):
-    try:
-        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
-        list_response = requests.get(list_url).json()
-        
-        valid_model = None
-        if 'models' in list_response:
-            for m in list_response['models']:
-                if 'supportedGenerationMethods' in m and 'generateContent' in m['supportedGenerationMethods']:
-                    if 'flash' in m['name'] or 'pro' in m['name']:
-                        valid_model = m['name']
-                        break
-            if not valid_model:
-                for m in list_response['models']:
-                    if 'supportedGenerationMethods' in m and 'generateContent' in m['supportedGenerationMethods']:
-                        valid_model = m['name']
-                        break
-                        
-        if not valid_model:
-            return f"🤖 AI 모델을 찾을 수 없습니다."
-
-        latest = df.iloc[-1]
-        prompt = f"""
-        당신은 암호화폐 전문 분석가 'AI 참모'입니다.
-        - 현재 비트코인 가격: ${latest['Close']:,.1f}
-        - 딥러닝(LSTM) 예측: 상승 확률 {up:.1f}%, 하락 확률 {down:.1f}%
-        - RSI_DK: {latest['RSI_DK']:.1f}
-        위 데이터를 바탕으로 현재 시장 상황과 투자 전략(진입/관망/익절)을 딱 3줄로 명확하게 브리핑하세요.
-        """
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/{valid_model}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "safetySettings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ]
-        }
-        
-        response = requests.post(url, headers=headers, json=data).json()
-        
-        if 'candidates' in response and len(response['candidates']) > 0:
-            ai_text = response['candidates'][0]['content']['parts'][0]['text']
-            return f"(LSTM 뇌 이식 완료 + {valid_model})\n\n{ai_text}"
-        elif 'error' in response:
-            return f"🤖 서버 거절: {response['error']['message']}"
-        else:
-            return f"🤖 알 수 없는 응답입니다."
-            
-    except Exception as e:
-        return f"🤖 통신망 오류 발생: {str(e)}"
-
-# 4. 지표 계산기
-def add_indicators_v6(df):
-    rsiLen = 14
-    df['lo'] = df['Low'].rolling(window=rsiLen).min()
-    df['hi'] = df['High'].rolling(window=rsiLen).max()
-    denom = df['hi'] - df['lo']
-    df['RSI_DK'] = np.where(denom == 0, 50, (df['Close'] - df['lo']) / denom * 100)
-    
-    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
-    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['River_Smoothed'] = (ema12 - ema26).ewm(span=5, adjust=False).mean()
-    df['River_Slope'] = df['River_Smoothed'].diff()
-    df['River_Accel'] = df['River_Slope'].diff()
-    
-    fortress = np.full(len(df), np.nan)
-    curr = np.nan
-    for i in range(1, len(df)):
-        if df['River_Slope'].iloc[i] < 0 and df['River_Accel'].iloc[i] > (abs(df['River_Slope'].iloc[i]) * 0.1):
-            curr = df['Low'].iloc[i]
-        elif df['River_Slope'].iloc[i] > 0 and df['River_Accel'].iloc[i] < -(abs(df['River_Slope'].iloc[i]) * 0.1):
-            curr = df['High'].iloc[i]
-        fortress[i] = curr
-    df['Fortress_Price'] = fortress
+# 1. 데이터 가져오기 (바이낸스)
+@st.cache_data(ttl=600)
+def get_data():
+    exchange = ccxt.binance()
+    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='1h', limit=200)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
 
-# 5. 데이터 수집 및 딥러닝 확률 예측
-@st.cache_data(ttl=60)
-def get_analysis_data(tf):
-    ex = ccxt.kraken() 
-    df = pd.DataFrame(ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300), columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
-    
-    df = add_indicators_v6(df)
-    df_c = df.dropna().copy()
-    
-    lstm_model = load_ai_brain()
-    
-    if lstm_model is not None:
-        features = ['Close', 'RSI_DK', 'River_Slope', 'River_Accel']
-        data = df_c[features].values
-        
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        scaled_data = scaler.fit_transform(data)
-        
-        time_steps = 10
-        latest_sequence = scaled_data[-time_steps:]
-        latest_sequence = np.expand_dims(latest_sequence, axis=0)
-        
-        prob = lstm_model.predict(latest_sequence, verbose=0)[0][0]
-        up_prob = prob * 100
-        down_prob = (1 - prob) * 100
-    else:
-        up_prob, down_prob = 50.0, 50.0
-        
-    return df, df_c.iloc[-1], up_prob, down_prob
+try:
+    df = get_data()
 
-# 6. 메인 화면 UI
-st.title("🧠 AI 참모 v3.0 (LSTM 딥러닝 탑재)")
-st.write("---")
+    # 2. 아주 간단한 학습 데이터 만들기
+    df['target'] = df['close'].shift(-1) # 다음 시간 가격 맞추기
+    train_df = df.dropna()
 
-col1, col2, col3 = st.columns(3)
-tf_map = {"1시간": "1h", "4시간": "4h", "1일": "1d"}
-sel_tf = None
-if col1.button("🔄 1시간 분석"): sel_tf = "1h"
-if col2.button("🔄 4시간 분석"): sel_tf = "4h"
-if col3.button("🔄 1일 분석"): sel_tf = "1d"
+    X = np.array(range(len(train_df))).reshape(-1, 1)
+    y = train_df['close']
 
-if sel_tf:
-    with st.spinner('딥러닝 뇌(LSTM)가 차트 흐름을 분석 중입니다...'):
-        df, latest, up, down = get_analysis_data(sel_tf)
-        
-        st.write("---")
-        
-        now_kst = datetime.utcnow() + timedelta(hours=9)
-        current_time_str = now_kst.strftime("%Y년 %m월 %d일 %H시 %M분 %S초")
-        st.caption(f"🕒 **업데이트 시간 (KST):** {current_time_str}")
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("현재 BTC 가격", f"${latest['Close']:,.1f}")
-        m2.metric("LSTM 상승 확률", f"{up:.1f}%")
-        m3.metric("LSTM 하락 확률", f"{down:.1f}%")
-        
-        ai_msg = get_safe_ai_briefing(df, up, down)
-        st.info(f"🤖 **제미나이 AI 실시간 브리핑**\n\n{ai_msg}")
-        
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-        fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='BTC', increasing_line_color='#00ffbb', decreasing_line_color='#ff0055'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Fortress_Price'], line=dict(color='#ffaa00', width=2, shape='hv'), name='🧲 성벽 라인'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI_DK'], name='RSI_DK', line=dict(color='#00e676')), row=2, col=1)
-        fig.add_hrect(y0=80, y1=100, fillcolor="rgba(0,128,0,0.1)", line_width=0, row=2, col=1)
-        fig.add_hrect(y0=0, y1=20, fillcolor="rgba(255,0,0,0.1)", line_width=0, row=2, col=1)
-        fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=600, margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig, use_container_width=True)
+    # 3. XGBoost 모델 (가벼움의 극치!)
+    model = XGBRegressor(n_estimators=100, learning_rate=0.1)
+    model.fit(X, y)
+
+    # 4. 예측
+    last_idx = np.array([[len(df)]])
+    prediction = model.predict(last_idx)[0]
+    current_price = df['close'].iloc[-1]
+    diff = prediction - current_price
+
+    # 5. 화면 출력
+    col1, col2 = st.columns(2)
+    col1.metric("현재 가격", f"${current_price:,.2f}")
+    col2.metric("AI 예측 (다음 시간)", f"${prediction:,.2f}", f"{diff:+.2f}")
+
+    # 차트 그리기
+    fig = go.Figure(data=[go.Candlestick(x=df['timestamp'],
+                open=df['open'], high=df['high'],
+                low=df['low'], close=df['close'])])
+    fig.update_layout(title='최근 비트코인 흐름', xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig)
+
+    st.success("✅ 가벼운 XGBoost 엔진으로 성공적으로 분석을 마쳤습니다!")
+
+except Exception as e:
+    st.error(f"에러 발생: {e}")
+
+st.info("💡 이 버전은 메모리 제한이 있는 무료 서버를 위해 최적화된 Lite 버전입니다.")
