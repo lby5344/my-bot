@@ -46,39 +46,29 @@ def predict_next_price(df):
     model.fit(X, y)
     return model.predict(np.array([[len(df)]]))[0]
 
-# 4. 제미나이 지능형 엔진 (사용 가능한 모델 자동 검색)
-def get_ai_briefing(df, pred, tf_name):
-    if "GEMINI_API_KEY" not in st.secrets:
-        return "❌ Secrets에 'GEMINI_API_KEY'가 없습니다."
-        
+# 4. 제미나이 브리핑 (캐시 기능을 넣어서 Limit 에러 방지!)
+@st.cache_data(ttl=1800) # 한번 물어본 브리핑은 30분(1800초) 동안 재사용합니다!
+def get_ai_briefing(df_json, pred, tf_name): # df 대신 json 형태로 넘겨야 캐싱이 잘 됩니다.
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        api_key = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=api_key)
         
-        # [핵심] 현재 API 키로 사용 가능한 모든 모델 목록 가져오기
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # 2.5-flash가 Limit이 심하면 1.5-flash로 수동 고정하는 것도 방법입니다.
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         
-        if not available_models:
-            return "❌ 사용 가능한 Gemini 모델이 없습니다. API 키 권한을 확인해 주세요."
-            
-        # 가장 최신 모델(보통 목록의 앞이나 뒤) 또는 Gemini 3/2 시리즈 우선 선택
-        target_model = ""
-        for m in ["models/gemini-3-flash", "models/gemini-2.0-flash", "models/gemini-1.5-flash"]:
-            if m in available_models:
-                target_model = m
-                break
-        
-        if not target_model:
-            target_model = available_models[0] # 없으면 그냥 첫 번째 모델 사용
-            
-        model = genai.GenerativeModel(target_model)
+        df = pd.read_json(df_json) # 전달받은 데이터를 다시 데이터프레임으로
         latest = df.iloc[-1]
-        prompt = f"비트코인 {tf_name} 기준 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$, RSI {latest['RSI']:.1f}. 친절하게 3줄 전략 짜줘."
+        prompt = f"비트코인 {tf_name} 기준 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$. 투자 전략 3줄 요약해줘."
         
         response = model.generate_content(prompt)
-        return f"({target_model} 분석 중)\n\n" + response.text
-        
+        return response.text
     except Exception as e:
-        return f"❌ [지능형 엔진 오류] {str(e)}"
+        if "429" in str(e):
+            return "⚠️ 구글 AI가 지금 너무 바쁩니다(한도 초과). 10분만 쉬었다가 다시 물어봐 주세요!"
+        return f"❌ 브리핑 생성 오류: {str(e)}"
+
+# [주의] 아래 메인 UI 부분에서 호출할 때 이렇게 바꿔주세요!
+# briefing = get_ai_briefing(df.to_json(), prediction, st.session_state.tf_name)
 
 # 5. UI 구성
 st.title("🧠 AI 비트코인 참모 v4.0")
