@@ -9,7 +9,7 @@ import google.generativeai as genai
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="AI 참모 v3.9 (2026 최적화)", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="AI 참모 v4.0 (지능형 엔진)", page_icon="🧠", layout="wide")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
@@ -46,42 +46,42 @@ def predict_next_price(df):
     model.fit(X, y)
     return model.predict(np.array([[len(df)]]))[0]
 
-# 4. 제미나이 브리핑 (2026년형 자동 모델 매칭)
+# 4. 제미나이 지능형 엔진 (사용 가능한 모델 자동 검색)
 def get_ai_briefing(df, pred, tf_name):
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "❌ Secrets에 'GEMINI_API_KEY'가 없습니다."
+        
     try:
-        if "GEMINI_API_KEY" not in st.secrets:
-            return "❌ Secrets에 'GEMINI_API_KEY'를 넣어주세요."
-            
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # [2026년 대응] 시도해볼 모델 명칭 리스트
-        # 1.5-flash가 안되면 2.0-flash나 일반 pro로 넘어갑니다.
-        model_names = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro']
+        # [핵심] 현재 API 키로 사용 가능한 모든 모델 목록 가져오기
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
+        if not available_models:
+            return "❌ 사용 가능한 Gemini 모델이 없습니다. API 키 권한을 확인해 주세요."
+            
+        # 가장 최신 모델(보통 목록의 앞이나 뒤) 또는 Gemini 3/2 시리즈 우선 선택
+        target_model = ""
+        for m in ["models/gemini-3-flash", "models/gemini-2.0-flash", "models/gemini-1.5-flash"]:
+            if m in available_models:
+                target_model = m
+                break
+        
+        if not target_model:
+            target_model = available_models[0] # 없으면 그냥 첫 번째 모델 사용
+            
+        model = genai.GenerativeModel(target_model)
         latest = df.iloc[-1]
         prompt = f"비트코인 {tf_name} 기준 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$, RSI {latest['RSI']:.1f}. 친절하게 3줄 전략 짜줘."
         
-        response_text = ""
-        for m_name in model_names:
-            try:
-                model = genai.GenerativeModel(m_name)
-                response = model.generate_content(prompt)
-                response_text = response.text
-                if response_text:
-                    break # 성공하면 탈출!
-            except:
-                continue # 실패하면 다음 모델로
-        
-        if not response_text:
-            return "❌ [404 해결불가] 구글 서버에서 사용 가능한 모델을 찾지 못했습니다. API 키 권한을 확인해 주세요."
-            
-        return response_text
+        response = model.generate_content(prompt)
+        return f"({target_model} 분석 중)\n\n" + response.text
         
     except Exception as e:
-        return f"❌ [오류 발생] {str(e)}"
+        return f"❌ [지능형 엔진 오류] {str(e)}"
 
-# 5. UI 구성 (생략 없이 전체 포함)
-st.title("🧠 AI 비트코인 참모 v3.9")
+# 5. UI 구성
+st.title("🧠 AI 비트코인 참모 v4.0")
 st.subheader(f"🕒 현재 시간(KST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
