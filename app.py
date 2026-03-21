@@ -6,30 +6,19 @@ from xgboost import XGBRegressor
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# 1. 페이지 설정 및 스타일
-st.set_page_config(page_title="AI 참모 v3.4 (Kraken 엔진)", page_icon="🧠", layout="wide")
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
-    html, body, [data-testid="stSidebar"], p, h1, h2, h3, h4, div { font-family: 'Nanum Gothic', sans-serif !important; }
-    div[data-testid="stMetricValue"] { font-size: 2.2rem; font-weight: 700; color: #ff00ff; }
-</style>
-""", unsafe_allow_html=True)
+# 1. 페이지 설정
+st.set_page_config(page_title="AI 참모 v3.5 (진단모드)", page_icon="🧠", layout="wide")
 
-# 2. 데이터 가져오기 (Kraken 사용 - 달러 기준)
-@st.cache_data(ttl=900) # 15분 캐시로 서버 부하 최소화
+# 2. 데이터 가져오기 (Kraken)
+@st.cache_data(ttl=900)
 def get_analysis_data(tf):
     try:
-        # 크라켄 거래소 설정
         ex = ccxt.kraken({'enableRateLimit': True})
-        # 크라켄은 BTC/USDT 페어를 지원합니다.
         ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=200)
         df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9) # KST
-        
-        # RSI 계산
+        df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -37,7 +26,7 @@ def get_analysis_data(tf):
         df['RSI'] = 100 - (100 / (1 + rs))
         return df.dropna()
     except Exception as e:
-        st.error(f"⚠️ 거래소(Kraken) 연결 지연 중입니다. 잠시 후 다시 시도해 주세요. ({str(e)})")
+        st.error(f"⚠️ 거래소 연결 에러: {e}")
         return None
 
 # 3. XGBoost 예측
@@ -47,70 +36,55 @@ def predict_next_price(df):
     df_train = df_train.dropna()
     X = np.array(range(len(df_train))).reshape(-1, 1)
     y = df_train['Close']
-    model = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=5)
+    model = XGBRegressor(n_estimators=100, learning_rate=0.1)
     model.fit(X, y)
-    next_idx = np.array([[len(df)]])
-    return model.predict(next_idx)[0]
+    return model.predict(np.array([[len(df)]]))[0]
 
-# 4. 제미나이 브리핑
+# 4. 제미나이 브리핑 (진단 기능 강화!)
 def get_ai_briefing(df, pred, tf_name):
+    # 1단계: 키가 있는지 확인
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "❌ [에러] 스트림릿 Secrets에 'GEMINI_API_KEY'라는 이름이 아예 없습니다. 이름을 확인해 주세요!"
+    
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
         latest = df.iloc[-1]
-        diff = pred - latest['Close']
-        status = "상승" if diff > 0 else "하락"
+        prompt = f"비트코인 {tf_name} 기준, 현재 {latest['Close']:.1f}$, AI예측 {pred:.1f}$. 짧게 3줄 전략 짜줘."
         
-        prompt = f"""
-        당신은 암호화폐 전문 'AI 참모'입니다. 거래소 크라켄의 데이터를 분석 중입니다.
-        - 분석 시간대: {tf_name}
-        - 현재 BTC 가격: ${latest['Close']:,.1f}
-        - AI 예측 가격: ${pred:,.1f} ({status} 예상)
-        - 현재 RSI: {latest['RSI']:.1f}
-        위 데이터를 바탕으로 마누라님께 딱 3줄로 핵심 투자 전략을 브리핑하세요. 
-        """
+        # 최신 모델로 시도
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}).json()
-        return response['candidates'][0]['content']['parts'][0]['text']
-    except:
-        return "🤖 브리핑을 준비 중입니다. 잠시만 기다려 주세요!"
+        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+        
+        if res.status_code == 200:
+            return res.json()['candidates'][0]['content']['parts'][0]['text']
+        else:
+            # 여기서 왜 에러가 나는지 범인을 잡아냅니다!
+            return f"❌ [에러 코드: {res.status_code}] 구글 서버가 거절했습니다. 이유: {res.text[:100]}"
+            
+    except Exception as e:
+        return f"❌ [기타 에러] 연결 중 오류 발생: {str(e)}"
 
-# 5. 메인 UI
-st.title("🧠 AI 비트코인 참모 v3.4 (Kraken)")
-now_kst = datetime.now()
-st.subheader(f"🕒 현재 시간 (KST): {now_kst.strftime('%Y-%m-%d %H:%M:%S')}")
-st.write("---")
+# 5. UI 구성
+st.title("🧠 AI 비트코인 참모 v3.5 (진단중)")
+st.subheader(f"🕒 현재 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-col_btn1, col_btn2, col_btn3 = st.columns(3)
-if 'tf' not in st.session_state:
-    st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
-
-if col_btn1.button("🔄 1시간 분석", use_container_width=True):
-    st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
-if col_btn2.button("🔄 4시간 분석", use_container_width=True):
-    st.session_state.tf, st.session_state.tf_name = "4h", "4시간"
-if col_btn3.button("🔄 1일 분석", use_container_width=True):
-    st.session_state.tf, st.session_state.tf_name = "1d", "1일"
+if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
+c1, c2, c3 = st.columns(3)
+if c1.button("1시간"): st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
+if c2.button("4시간"): st.session_state.tf, st.session_state.tf_name = "4h", "4시간"
+if c3.button("1일"): st.session_state.tf, st.session_state.tf_name = "1d", "1일"
 
 df = get_analysis_data(st.session_state.tf)
-
 if df is not None:
-    with st.spinner(f'크라켄 데이터 분석 중...'):
-        prediction = predict_next_price(df)
-        latest_price = df['Close'].iloc[-1]
-        diff = prediction - latest_price
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("현재 가격 (USD)", f"${latest_price:,.1f}")
-        m2.metric(f"{st.session_state.tf_name} 후 예측", f"${prediction:,.1f}", f"{diff:+.1f}$")
-        m3.metric("RSI 지수", f"{df['RSI'].iloc[-1]:.1f}")
-        
-        briefing = get_ai_briefing(df, prediction, st.session_state.tf_name)
-        st.info(f"💬 **AI 참모의 실시간 브리핑 (Kraken)**\n\n{briefing}")
-        
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-        fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='BTC'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', line=dict(color='#ff00ff')), row=2, col=1)
-        fig.add_hrect(y0=70, y1=100, fillcolor="red", opacity=0.1, row=2, col=1)
-        fig.add_hrect(y0=0, y1=30, fillcolor="blue", opacity=0.1, row=2, col=1)
-        fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=600)
-        st.plotly_chart(fig, use_container_width=True)
+    pred = predict_next_price(df)
+    cur = df['Close'].iloc[-1]
+    
+    st.metric("현재가 vs AI예측", f"${cur:,.1f}", f"{pred-cur:+.1f}$")
+    
+    # 💬 여기가 핵심입니다!
+    st.info(f"💬 **AI 참모 진단 보고서**\n\n{get_ai_briefing(df, pred, st.session_state.tf_name)}")
+    
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
+    fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']), row=1, col=1)
+    fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=500)
+    st.plotly_chart(fig, use_container_width=True)
