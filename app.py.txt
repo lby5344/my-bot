@@ -6,13 +6,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from datetime import datetime, timedelta
-# [수정] 딥러닝과 스케일러 도구 추가
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import load_model
 import os
 
+# 1. 스트림릿 금고에서 API 키 불러오기
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
+# 2. 페이지 설정 (v3.0 타이틀 적용)
 st.set_page_config(page_title="AI 참모 v3.0 (LSTM 딥러닝 탑재)", page_icon="🧠", layout="wide")
 st.markdown("""
 <style>
@@ -22,7 +23,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 🧠 [신규] 딥러닝 모델(뇌 파일) 불러오기 (캐싱해서 서버 부하 방지)
+# 🧠 [신규] 딥러닝 모델(뇌 파일) 불러오기
 @st.cache_resource
 def load_ai_brain():
     model_path = 'ai_trader_lstm.h5'
@@ -31,6 +32,7 @@ def load_ai_brain():
     else:
         return None
 
+# 3. AI 브리핑 함수
 def get_safe_ai_briefing(df, up, down):
     try:
         list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
@@ -77,16 +79,17 @@ def get_safe_ai_briefing(df, up, down):
         
         if 'candidates' in response and len(response['candidates']) > 0:
             ai_text = response['candidates'][0]['content']['parts'][0]['text']
-            return f"(LSTM + {valid_model} 연동 완료)\n\n{ai_text}"
+            return f"(LSTM 뇌 이식 완료 + {valid_model})\n\n{ai_text}"
         elif 'error' in response:
-            return f"🤖 서버가 거절했습니다. 사유: {response['error']['message']}"
+            return f"🤖 서버 거절: {response['error']['message']}"
         else:
             return f"🤖 알 수 없는 응답입니다."
             
     except Exception as e:
         return f"🤖 통신망 오류 발생: {str(e)}"
 
-def add_indicators_v6(df, mtf_df=None):
+# 4. 지표 계산기
+def add_indicators_v6(df):
     rsiLen = 14
     df['lo'] = df['Low'].rolling(window=rsiLen).min()
     df['hi'] = df['High'].rolling(window=rsiLen).max()
@@ -110,43 +113,38 @@ def add_indicators_v6(df, mtf_df=None):
     df['Fortress_Price'] = fortress
     return df
 
+# 5. 데이터 수집 및 딥러닝 확률 예측
 @st.cache_data(ttl=60)
 def get_analysis_data(tf):
     ex = ccxt.kraken() 
-    # LSTM은 과거 흐름이 중요하므로 데이터를 더 많이 가져옵니다 (200 -> 300)
     df = pd.DataFrame(ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300), columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
     
     df = add_indicators_v6(df)
     df_c = df.dropna().copy()
     
-    # [수정] RandomForest 대신 LSTM으로 확률 예측
     lstm_model = load_ai_brain()
     
     if lstm_model is not None:
         features = ['Close', 'RSI_DK', 'River_Slope', 'River_Accel']
         data = df_c[features].values
         
-        # 0~1 사이로 스케일링
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data)
         
-        # 가장 최근 10개의 캔들 흐름(동영상)을 자릅니다.
         time_steps = 10
         latest_sequence = scaled_data[-time_steps:]
         latest_sequence = np.expand_dims(latest_sequence, axis=0)
         
-        # 딥러닝 뇌에 최근 10시간 흐름을 던져주고 확률을 받아옵니다.
         prob = lstm_model.predict(latest_sequence, verbose=0)[0][0]
         up_prob = prob * 100
         down_prob = (1 - prob) * 100
     else:
-        # 뇌 파일이 없으면 50:50 으로 출력
         up_prob, down_prob = 50.0, 50.0
         
     return df, df_c.iloc[-1], up_prob, down_prob
 
-# 5. 메인 화면 UI
+# 6. 메인 화면 UI
 st.title("🧠 AI 참모 v3.0 (LSTM 딥러닝 탑재)")
 st.write("---")
 
