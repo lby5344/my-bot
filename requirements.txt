@@ -2,8 +2,8 @@ streamlit
 ccxt
 pandas
 numpy
-scikit-learn
 plotly
-requests
-xgboost
+scikit-learn
+tensorflow-cpu
 google-generativeai
+pytz
