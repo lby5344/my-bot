@@ -72,7 +72,7 @@ def get_ai_briefing(df_json, pred, tf_name):
             return "❌ API 키가 설정되지 않았습니다. 이지패널 Environment 탭을 확인하세요."
             
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         
         df = pd.read_json(df_json)
         latest = df.iloc[-1]
