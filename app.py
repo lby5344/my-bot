@@ -96,7 +96,7 @@ if df is not None:
     m2.metric(f"{st.session_state.tf_name} 후 예측", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
     m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
-    st.info(f"💬 **AI 참모 실시간 브리핑**\n\n{get_ai_briefing(df, pred, st.session_state.tf_name)}")
+    st.info(f"💬 **AI 참모 실시간 브리핑**\n\n{get_ai_briefing(df.to_json(), pred, st.session_state.tf_name)}")
     
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
     fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="BTC"), row=1, col=1)
