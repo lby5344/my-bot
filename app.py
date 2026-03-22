@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import ccxt
 import pandas as pd
@@ -50,7 +51,7 @@ def predict_next_price(df):
 @st.cache_data(ttl=1800) # 한번 물어본 브리핑은 30분(1800초) 동안 재사용합니다!
 def get_ai_briefing(df_json, pred, tf_name): # df 대신 json 형태로 넘겨야 캐싱이 잘 됩니다.
     try:
-        api_key = st.secrets["GEMINI_API_KEY"]
+        api_key = os.getenv("GEMINI_API_KEY")
         genai.configure(api_key=api_key)
         
         # 2.5-flash가 Limit이 심하면 1.5-flash로 수동 고정하는 것도 방법입니다.
