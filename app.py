@@ -3,7 +3,6 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
-import google.generativeai as genai
 from datetime import datetime
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
