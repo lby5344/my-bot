@@ -84,7 +84,7 @@ def get_ai_briefing(df_json, pred, tf_name):
         return f"❌ 브리핑 생성 오류: {str(e)}"
 
 # 5. UI 구성
- st.title("🤖 AI 비트코인 참모 (LSTM v4.5)")
+st.title("🤖 AI 비트코인 참모 (LSTM v4.5)")
 
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
 c1, c2, c3 = st.columns(3)
