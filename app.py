@@ -34,7 +34,7 @@ def get_ai_briefing(df_json, prediction, model_name):
         """
         
         completion = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model="openai/gpt-oss-120b",
             messages=[{"role": "user", "content": prompt}],
         )
         return completion.choices[0].message.content
