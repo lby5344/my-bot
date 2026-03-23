@@ -9,6 +9,40 @@ from plotly.subplots import make_subplots
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+import pytz
+from datetime import datetime
+
+# [1. 현재 시간 설정] 대한민국 표준시(KST) 가져오기
+kst = pytz.timezone('Asia/Seoul')
+now_kst = datetime.now(kst).strftime('%Y-%m-%d %H:%M:%S')
+
+# [2. 폰트 교체 및 스타일 설정] 나눔고딕 적용 및 브리핑 색상 지정
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
+
+    /* 전체 폰트를 나눔고딕으로 변경 */
+    html, body, [class*="css"]  {
+        font-family: 'Nanum Gothic', sans-serif;
+    }
+
+    /* 브리핑 텍스트 스타일: 다크모드에서 잘 보이는 밝은 민트/형광색 */
+    .briefing-box {
+        background-color: #1E1E1E;
+        color: #00FFA3; /* 형광 민트색 (가독성 최고) */
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #00FFA3;
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+    .time-display {
+        text-align: right;
+        color: #AAAAAA;
+        font-size: 0.9rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # 1. 페이지 설정
 st.set_page_config(page_title="AI 참모 v4.5 (LSTM 엔진)", page_icon="🤖", layout="wide")
@@ -118,6 +152,9 @@ def get_groq_briefing(df_summary, prediction):
 # 5. UI 구성
 st.title("🤖 AI 비트코인 참모 (LSTM v4.5)")
 
+# [시간 표시] 오른쪽 상단에 작게 표시됩니다.
+st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
+st.markdown("---")
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
 c1, c2, c3 = st.columns(3)
 if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
@@ -136,8 +173,18 @@ if df is not None:
     m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
     # [중요] .to_json()을 붙여서 JSON 글자로 전달!
-    st.info(f"💬 **AI 참모 LSTM 실시간 브리핑**\n\n{get_ai_briefing(df.tail(20).to_json(), pred, st.session_state.tf_name)}")
-    
+    #st.info(f"💬 **AI 참모 LSTM 실시간 브리핑**\n\n{get_ai_briefing(df.tail(20).to_json(), pred, st.session_state.tf_name)}")
+    # [수정 전] st.info(f"💬 AI 참모... {get_ai_briefing(...)}")
+
+# [수정 후] 더 잘 보이는 커스텀 박스로 출력
+briefing_content = get_ai_briefing(df.tail(10).to_json(), pred, st.session_state.tf_name)
+
+st.markdown(f"""
+    <div class="briefing-box">
+        <strong>💬 AI 참모 실시간 브리핑</strong><br><br>
+        {briefing_content}
+    </div>
+    """, unsafe_allow_html=True)
     # 차트 그리기
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
     fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="BTC"), row=1, col=1)
