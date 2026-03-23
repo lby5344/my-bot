@@ -177,15 +177,18 @@ if df is not None:
     # [수정 전] st.info(f"💬 AI 참모... {get_ai_briefing(...)}")
 
 # [수정 후] 더 잘 보이는 커스텀 박스로 출력
-briefing_content = get_ai_briefing(df.tail(10).to_json(), pred, st.session_state.tf_name)
+# --- 여기서부터 180행 근처입니다 ---
+    # 1. AI 브리핑 생성 및 출력
+    briefing_content = get_ai_briefing(df.tail(10).to_json(), pred, st.session_state.tf_name)
 
-st.markdown(f"""
-    <div class="briefing-box">
-        <strong>💬 AI 참모 실시간 브리핑</strong><br><br>
-        {briefing_content}
-    </div>
-    """, unsafe_allow_html=True)
-    # 차트 그리기
+    st.markdown(f"""
+        <div class="briefing-box">
+            <strong>💬 AI 참모 실시간 브리핑</strong><br><br>
+            {briefing_content}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # 2. 차트 그리기 (이 줄들이 위 markdown과 왼쪽 끝이 똑같이 맞아야 합니다!)
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
     fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="BTC"), row=1, col=1)
     fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', line=dict(color='#ff00ff')), row=2, col=1)
