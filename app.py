@@ -136,7 +136,7 @@ if df is not None:
     m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
     # [중요] .to_json()을 붙여서 JSON 글자로 전달!
-    st.info(f"💬 **AI 참모 LSTM 실시간 브리핑**\n\n{get_ai_briefing(df.tail(10).to_json(), pred, st.session_state.tf_name)}")
+    st.info(f"💬 **AI 참모 LSTM 실시간 브리핑**\n\n{get_ai_briefing(df.tail(20).to_json(), pred, st.session_state.tf_name)}")
     
     # 차트 그리기
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
