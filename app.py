@@ -67,7 +67,7 @@ def predict_next_price(df):
 def get_ai_briefing(df_json, pred, tf_name):
     try:
         # 이지패널 환경변수에서 키 가져오기
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             return "❌ API 키가 설정되지 않았습니다. 이지패널 Environment 탭을 확인하세요."
             
