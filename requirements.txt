@@ -5,5 +5,5 @@ numpy
 plotly
 scikit-learn
 tensorflow-cpu
-google-generativeai
+groq
 pytz
