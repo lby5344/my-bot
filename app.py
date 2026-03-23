@@ -15,6 +15,33 @@ st.set_page_config(page_title="AI 참모 v4.5 (LSTM 엔진)", page_icon="🤖", 
 
 # 2. 데이터 가져오기 (Kraken)
 @st.cache_data(ttl=900)
+def get_ai_briefing(df_json, prediction, model_name):
+    # 이지패널 Environment 탭에 넣은 이름과 똑같아야 합니다!
+    api_key = os.getenv("GROQ_API_KEY") 
+    
+    if not api_key:
+        return "❌ API 키가 설정되지 않았습니다. 이지패널 설정을 확인하세요."
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        
+        prompt = f"""
+        당신은 전문 비트코인 트레이딩 참모입니다. (모델: {model_name})
+        최근 시장 데이터: {df_json}
+        LSTM 예측 결과: {prediction}
+        위 정보를 바탕으로 현재 상황을 3문장으로 날카롭게 브리핑해줘.
+        """
+        
+        completion = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"❌ 브리핑 생성 오류: {str(e)}"
+
+# --- 여기 아래에 원래 있던 18행(def get_analysis_data)이 오면 됩니다 ---
 def get_analysis_data(tf):
     try:
         ex = ccxt.kraken({'enableRateLimit': True})
