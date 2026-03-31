@@ -17,7 +17,7 @@ from datetime import datetime
 kst = pytz.timezone('Asia/Seoul')
 now_kst = datetime.now(kst).strftime('%Y-%m-%d %H:%M:%S')
 
-st.set_page_config(page_title="AI 참모 v5.0 (다변량 LSTM 엔진)", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AI 참모 v5.1 (다변량 LSTM 엔진)", page_icon="🤖", layout="wide")
 
 st.markdown("""
     <style>
@@ -33,7 +33,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# [Step 3 반영] 중복 코드 제거 및 API 보안 강화
+# [AI 브리핑] Groq LLM 연동
 # ==========================================
 @st.cache_data(ttl=900)
 def get_ai_briefing(df_json, prediction, model_name):
@@ -58,7 +58,7 @@ def get_ai_briefing(df_json, prediction, model_name):
         """
         
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # 고성능 모델로 통일
+            model="llama-3.3-70b-versatile", # 고성능 모델
             messages=[{"role": "user", "content": prompt}],
         )
         return completion.choices[0].message.content
@@ -66,12 +66,12 @@ def get_ai_briefing(df_json, prediction, model_name):
         return f"❌ 브리핑 생성 오류: {str(e)}"
 
 # ==========================================
-# [Step 2 반영] 데이터 파이프라인 고도화 (RSI, 거래량 추가)
+# [데이터 수집] 크라켄 거래소 OHLCV 및 보조지표
 # ==========================================
 def get_analysis_data(tf):
     try:
         ex = ccxt.kraken({'enableRateLimit': True})
-        ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300) # 더 안정적인 스케일링을 위해 300개 로드
+        ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300) # 안정적인 스케일링을 위해 300개 로드
         df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
         
@@ -82,7 +82,7 @@ def get_analysis_data(tf):
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # 이동평균선 추가 (선택적 활용)
+        # 이동평균선 추가
         df['MA20'] = df['Close'].rolling(window=20).mean()
         
         return df.dropna()
@@ -91,7 +91,7 @@ def get_analysis_data(tf):
         return None
 
 # ==========================================
-# [Step 1 & 2 반영] 다변량 LSTM 및 모델 캐싱(저장/로드) 최적화
+# [예측 엔진] 다변량 LSTM 및 모델 캐싱 최적화
 # ==========================================
 def build_and_train_model(X, y, input_shape):
     """최초 1회 실행 시 모델을 구축하고 학습시키는 헬퍼 함수"""
@@ -103,7 +103,7 @@ def build_and_train_model(X, y, input_shape):
         Dense(1)
     ])
     model.compile(optimizer='adam', loss='mean_squared_error')
-    model.fit(X, y, epochs=20, batch_size=16, verbose=0) # Epoch 늘려서 제대로 1회 학습
+    model.fit(X, y, epochs=20, batch_size=16, verbose=0)
     return model
 
 def predict_next_price(df, tf_name):
@@ -111,7 +111,7 @@ def predict_next_price(df, tf_name):
     features = ['Close', 'Volume', 'RSI']
     data = df[features].values
     
-    # 2. 스케일링 (Data Leakage 부분 해소)
+    # 2. 스케일링
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data)
     
@@ -127,7 +127,8 @@ def predict_next_price(df, tf_name):
     # 최근 10개 데이터 (다음 가격 예측용)
     X_latest = scaled_data[-seq_length:].reshape(1, seq_length, num_features)
     
-    model_path = f"ai_trader_lstm_{tf_name}.h5" # 타임프레임별로 모델 분리 저장
+    # [최신 표준 반영] .keras 확장자 사용 (경고 해결)
+    model_path = f"ai_trader_lstm_{tf_name}.keras" 
     
     # 3. 모델 로드 OR 학습 후 저장 (엔진 최적화)
     if os.path.exists(model_path):
@@ -153,15 +154,17 @@ def predict_next_price(df, tf_name):
 # ==========================================
 # [메인 UI] 대시보드 렌더링
 # ==========================================
-st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.0)")
+st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
 c1, c2, c3 = st.columns(3)
-if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
-if c2.button("4시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
-if c3.button("1일 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
+
+# [최신 표준 반영] use_container_width=True 대신 width='stretch' 사용 (경고 해결)
+if c1.button("1시간 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
+if c2.button("4시간 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
+if c3.button("1일 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
 
 df = get_analysis_data(st.session_state.tf)
 if df is not None:
@@ -194,4 +197,6 @@ if df is not None:
     fig.add_hline(y=30, line_dash="dot", row=2, col=1, line_color="blue")
     
     fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=30, b=0))
-    st.plotly_chart(fig, use_container_width=True)
+    
+    # [최신 표준 반영] 차트 폭 설정 수정
+    st.plotly_chart(fig, width='stretch')
