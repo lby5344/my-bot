@@ -9,6 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import pytz
+os.getenv("GROQ_API_KEY")
 from datetime import datetime
 
 # ==========================================
@@ -150,6 +151,47 @@ def predict_next_price(df, tf_name):
     predicted_price = scaler.inverse_transform(dummy_array)[0][0]
     
     return predicted_price
+
+# --- [추가] 모델 재학습 함수 ---
+def retrain_model(df):
+    st.info("🔄 최신 데이터를 바탕으로 AI 모델 재학습을 시작합니다. 잠시만 기다려 주세요...")
+    
+    # 1. 데이터 준비 (최근 200개 데이터 사용)
+    data = df[['Close']].values
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
+
+    X, y = [], []
+    for i in range(10, len(scaled_data)):
+        X.append(scaled_data[i-10:i, 0])
+        y.append(scaled_data[i, 0])
+    X, y = np.array(X), np.array(y)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+
+    # 2. 모델 구성 및 학습 (기존 모델이 있으면 가중치 유지, 없으면 신규 생성)
+    model = Sequential([
+        LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)),
+        LSTM(units=50),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    
+    # 3. 학습 진행 (에포크를 조절하여 학습 강도 설정)
+    with st.spinner('학습 중... (약 30초 소요)'):
+        model.fit(X, y, epochs=20, batch_size=16, verbose=0)
+    
+    # 4. 모델 저장 (기존 h5 파일 덮어쓰기)
+    model.save('ai_trader_lstm.h5')
+    st.success("✅ 재학습 완료! 모델이 최신 상태로 업데이트되었습니다.")
+    st.rerun() # 앱 재시작하여 새 모델 로드
+
+# --- [UI 부분] 사이드바 또는 상단에 버튼 추가 ---
+st.sidebar.title("⚙️ 설정 및 관리")
+if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
+    # 최신 데이터를 더 많이 가져와서 학습 (예: 500개)
+    training_df = get_analysis_data(st.session_state.tf) 
+    if training_df is not None:
+        retrain_model(training_df)
 
 # ==========================================
 # [메인 UI] 대시보드 렌더링
