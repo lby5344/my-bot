@@ -5,6 +5,5 @@ numpy
 plotly
 scikit-learn
 tensorflow-cpu
-h5py
 groq
 pytz
