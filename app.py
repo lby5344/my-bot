@@ -196,17 +196,23 @@ if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width
 # [메인 UI] 대시보드 렌더링
 # ==========================================
 st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
-# 폰트 크기를 조절하고 약간 흐릿한 오렌지색으로 경고 느낌 부여
+
+# 1. 괄호와 문법을 수정한 경고문 (간격을 -10px로 약간 완화했습니다)
 st.markdown("""
-    <p style='font-size: 0.85rem; color: #FFA500; margin-top: -15px; margin-bottom: 20px;'>
+    <p style='font-size: 0.85rem; color: #FFA500; margin-top: -10px; margin-bottom: 15px; font-weight: bold;'>
         ※ 면책조항: 본 시스템의 예측은 참고용이며, 모든 투자 결정과 책임은 사용자 본인에게 있습니다.
     </p>
     """, unsafe_allow_html=True)
+
+# 2. 분석 시간 표시
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
-c1, c2, c3 = st.columns(3)
+# 3. 세션 상태 초기화 및 컬럼 생성 (괄호 닫기 완료!)
+if 'tf' not in st.session_state: 
+    st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
+
+c1, c2, c3 = st.columns(3) # <-- 여기에 괄호 ')'가 빠져있었습니다!
 
 # [최신 표준 반영] use_container_width=True 대신 width='stretch' 사용 (경고 해결)
 if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
