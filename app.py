@@ -17,8 +17,9 @@ from datetime import datetime
 kst = pytz.timezone('Asia/Seoul')
 now_kst = datetime.now(kst).strftime('%Y-%m-%d %H:%M:%S')
 
-st.set_page_config(page_title="AI 참모 v5.1 (다변량 LSTM 엔진)", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AI 참모 v5.1", page_icon="🤖", layout="wide")
 
+# CSS 스타일 정의
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700&display=swap');
@@ -33,32 +34,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# [AI 브리핑] Groq LLM 연동
-# ==========================================
-@st.cache_data(ttl=900)
-def get_ai_briefing(df_json, prediction, model_name):
-    try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except:
-        api_key = os.getenv("GROQ_API_KEY") 
-    
-    if not api_key:
-        return "❌ API 키가 설정되지 않았습니다."
-
-    try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
-        prompt = f"""당신은 최고 수준의 비트코인 트레이딩 참모입니다. (기준 타임프레임: {model_name})\n최근 데이터: {df_json}\n예측가: {prediction}\n상황을 3문장 브리핑하고 포지션을 추천해."""
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"❌ 브리핑 생성 오류: {str(e)}"
-
-# ==========================================
-# [데이터 수집 및 예측 엔진]
+# [함수 정의] (에러 방지를 위해 위쪽에 배치)
 # ==========================================
 def get_analysis_data(tf):
     try:
@@ -101,6 +77,8 @@ def predict_next_price(df, tf_name):
     X, y = np.array(X), np.array(y)
     X_latest = scaled_data[-seq_length:].reshape(1, seq_length, num_features)
     model_path = f"ai_trader_lstm_{tf_name}.keras"
+    
+    # 모델 로드 또는 생성
     if os.path.exists(model_path):
         try: model = load_model(model_path)
         except: 
@@ -109,30 +87,32 @@ def predict_next_price(df, tf_name):
     else:
         model = build_and_train_model(X, y, (seq_length, num_features))
         model.save(model_path)
+    
     pred_scaled = model.predict(X_latest, verbose=0)
     dummy = np.zeros((1, num_features)); dummy[0, 0] = pred_scaled[0][0]
     return scaler.inverse_transform(dummy)[0][0]
 
-# ==========================================
-# [사이드바 설정] 
-# ==========================================
-st.sidebar.title("⚙️ 설정 및 관리")
-if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
-    tf_current = st.session_state.get('tf', '1h')
-    training_df = get_analysis_data(tf_current) 
-    if training_df is not None:
-        with st.spinner("최신 데이터로 재학습 중입니다..."):
-            m_path = f"ai_trader_lstm_{st.session_state.get('tf_name', '1h')}.keras"
-            if os.path.exists(m_path): os.remove(m_path)
-        st.success("✅ 모델 초기화 완료! 메인 화면을 갱신하면 자동 재학습됩니다.")
-        st.rerun()
+@st.cache_data(ttl=900)
+def get_ai_briefing(df_json, prediction, model_name):
+    api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+    if not api_key: return "❌ API 키가 없습니다."
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        prompt = f"당신은 비트코인 트레이딩 참모입니다. ({model_name})\n데이터: {df_json}\n예측가: {prediction}\n3문장 브리핑 및 포지션 추천."
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return completion.choices[0].message.content
+    except Exception as e: return f"❌ 오류: {str(e)}"
 
 # ==========================================
-# [메인 UI] 대시보드 렌더링
+# [메인 UI] 대시보드 시작
 # ==========================================
 st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
 
-# --- [수정 포인트] 경고문 위치 ---
+# ★ 경고문: 코드 최상단에 배치하여 무조건 출력되게 함
 st.markdown("""
     <p style='font-size: 0.85rem; color: #FFA500; margin-top: -10px; margin-bottom: 15px; font-weight: bold;'>
         ※ 면책조항: 본 시스템의 예측은 참고용이며, 모든 투자 결정과 책임은 사용자 본인에게 있습니다.
@@ -142,6 +122,16 @@ st.markdown("""
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
 st.markdown("---")
 
+# 사이드바 관리
+st.sidebar.title("⚙️ 설정 및 관리")
+if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
+    tf_current = st.session_state.get('tf', '1h')
+    m_path = f"ai_trader_lstm_{st.session_state.get('tf_name', '1h')}.keras"
+    if os.path.exists(m_path): os.remove(m_path)
+    st.sidebar.success("✅ 모델 삭제됨. 다시 분석 버튼을 누르면 재학습됩니다.")
+    st.rerun()
+
+# 타임프레임 선택
 if 'tf' not in st.session_state:
     st.session_state.tf, st.session_state.tf_name = "1h", "1h"
 
@@ -150,6 +140,7 @@ if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, s
 if c2.button("4시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
 if c3.button("1일 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
 
+# 분석 실행
 df = get_analysis_data(st.session_state.tf)
 if df is not None:
     with st.spinner(f'{st.session_state.tf_name} 기준 AI 분석 중...'):
@@ -159,7 +150,7 @@ if df is not None:
     m1, m2, m3 = st.columns(3)
     m1.metric("현재가", f"${cur:,.1f}")
     m2.metric("다음 예측가", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
-    m3.metric("현재 RSI", f"{df['RSI'].iloc[-1]:.1f}")
+    m3.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
     briefing = get_ai_briefing(df[['Close', 'Volume', 'RSI']].tail(5).to_json(), pred, st.session_state.tf_name)
     st.markdown(f'<div class="briefing-box"><strong>💬 AI 전략 브리핑</strong><br><br>{briefing}</div>', unsafe_allow_html=True)
