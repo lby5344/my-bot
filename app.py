@@ -130,7 +130,7 @@ if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width
 # ==========================================
 # [메인 UI] 대시보드 렌더링
 # ==========================================
-st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
+st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v6.1)")
 
 # 여기에 캡션 추가
 st.caption("⚠️ 본 AI 예측은 과거 데이터를 기반으로 한 통계적 확률이며, 투자 결과에 대한 법적 책임을 지지 않습니다.")
