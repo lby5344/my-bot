@@ -9,7 +9,6 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import pytz
-os.getenv("GROQ_API_KEY")
 from datetime import datetime
 
 # ==========================================
@@ -38,28 +37,20 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=900)
 def get_ai_briefing(df_json, prediction, model_name):
-    # st.secrets 우선 확인 후 없으면 os.getenv 사용 (보안 및 유연성 강화)
     try:
         api_key = st.secrets["GROQ_API_KEY"]
     except:
         api_key = os.getenv("GROQ_API_KEY") 
     
     if not api_key:
-        return "❌ API 키가 설정되지 않았습니다. 환경변수나 secrets.toml을 확인하세요."
+        return "❌ API 키가 설정되지 않았습니다."
 
     try:
         from groq import Groq
         client = Groq(api_key=api_key)
-        
-        prompt = f"""
-        당신은 최고 수준의 비트코인 트레이딩 참모입니다. (기준 타임프레임: {model_name})
-        최근 다변량 시장 데이터(종가, 거래량, RSI): {df_json}
-        다변량 LSTM 엔진 예측 다음 종가: {prediction}
-        위 정보를 바탕으로 현재 상황을 3문장으로 날카롭게 브리핑하고, 트레이딩 포지션(롱/숏/관망)을 추천해.
-        """
-        
+        prompt = f"""당신은 최고 수준의 비트코인 트레이딩 참모입니다. (기준 타임프레임: {model_name})\n최근 데이터: {df_json}\n예측가: {prediction}\n상황을 3문장 브리핑하고 포지션을 추천해."""
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # 고성능 모델
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
         )
         return completion.choices[0].message.content
@@ -67,38 +58,27 @@ def get_ai_briefing(df_json, prediction, model_name):
         return f"❌ 브리핑 생성 오류: {str(e)}"
 
 # ==========================================
-# [데이터 수집] 크라켄 거래소 OHLCV 및 보조지표
+# [데이터 수집 및 예측 엔진]
 # ==========================================
 def get_analysis_data(tf):
     try:
         ex = ccxt.kraken({'enableRateLimit': True})
-        ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300) # 안정적인 스케일링을 위해 300개 로드
+        ohlcv = ex.fetch_ohlcv('BTC/USDT', timeframe=tf, limit=300)
         df = pd.DataFrame(ohlcv, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df['Date'] = pd.to_datetime(df['Date'], unit='ms') + pd.Timedelta(hours=9)
-        
-        # 보조지표 RSI 계산
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # 이동평균선 추가
+        df['RSI'] = 100 - (100 / (1 + (gain / loss)))
         df['MA20'] = df['Close'].rolling(window=20).mean()
-        
         return df.dropna()
     except Exception as e:
-        st.error(f"⚠️ 데이터 로딩 실패: {e}")
-        return None
+        st.error(f"⚠️ 데이터 로딩 실패: {e}"); return None
 
-# ==========================================
-# [예측 엔진] 다변량 LSTM 및 모델 캐싱 최적화
-# ==========================================
 def build_and_train_model(X, y, input_shape):
-    """최초 1회 실행 시 모델을 구축하고 학습시키는 헬퍼 함수"""
     model = Sequential([
         LSTM(units=64, return_sequences=True, input_shape=input_shape),
-        Dropout(0.2), # 과적합 방지
+        Dropout(0.2),
         LSTM(units=32),
         Dropout(0.2),
         Dense(1)
@@ -108,148 +88,85 @@ def build_and_train_model(X, y, input_shape):
     return model
 
 def predict_next_price(df, tf_name):
-    # 1. 다변량 피처 선정 (종가, 거래량, RSI)
     features = ['Close', 'Volume', 'RSI']
     data = df[features].values
-    
-    # 2. 스케일링
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data)
-    
     seq_length = 10
     num_features = len(features)
-    
     X, y = [], []
     for i in range(seq_length, len(scaled_data)):
         X.append(scaled_data[i-seq_length:i])
-        y.append(scaled_data[i, 0]) # 'Close' 가격만 타겟으로 설정
+        y.append(scaled_data[i, 0])
     X, y = np.array(X), np.array(y)
-    
-    # 최근 10개 데이터 (다음 가격 예측용)
     X_latest = scaled_data[-seq_length:].reshape(1, seq_length, num_features)
-    
-    # [최신 표준 반영] .keras 확장자 사용 (경고 해결)
-    model_path = f"ai_trader_lstm_{tf_name}.keras" 
-    
-    # 3. 모델 로드 OR 학습 후 저장 (엔진 최적화)
+    model_path = f"ai_trader_lstm_{tf_name}.keras"
     if os.path.exists(model_path):
-        try:
-            model = load_model(model_path)
-        except:
+        try: model = load_model(model_path)
+        except: 
             model = build_and_train_model(X, y, (seq_length, num_features))
             model.save(model_path)
     else:
         model = build_and_train_model(X, y, (seq_length, num_features))
-        model.save(model_path) # 학습 완료된 모델 저장
-        
-    # 4. 예측 수행
+        model.save(model_path)
     pred_scaled = model.predict(X_latest, verbose=0)
-    
-    # 5. 역스케일링 (종가 자리만 값을 채워서 복원)
-    dummy_array = np.zeros((1, num_features))
-    dummy_array[0, 0] = pred_scaled[0][0] 
-    predicted_price = scaler.inverse_transform(dummy_array)[0][0]
-    
-    return predicted_price
+    dummy = np.zeros((1, num_features)); dummy[0, 0] = pred_scaled[0][0]
+    return scaler.inverse_transform(dummy)[0][0]
 
-# --- [추가] 모델 재학습 함수 ---
-# 기존 retrain_model 함수는 삭제!
-
-if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
-    training_df = get_analysis_data(st.session_state.tf) 
-    if training_df is not None:
-        with st.spinner("최신 데이터로 재학습 중입니다..."):
-            # 기존에 있던 모델 파일을 삭제하면, 
-            # predict_next_price 함수가 다음 번에 실행될 때 알아서 새 모델을 훈련시킵니다.
-            model_path = f"ai_trader_lstm_{st.session_state.tf_name}.keras"
-            if os.path.exists(model_path):
-                os.remove(model_path)
-        st.success("✅ 모델 초기화 완료! 메인 화면을 갱신하면 3변수 기반으로 자동 재학습됩니다.")
-        st.rerun()
-
-    # 2. 모델 구성 및 학습 (기존 모델이 있으면 가중치 유지, 없으면 신규 생성)
-    model = Sequential([
-        LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)),
-        LSTM(units=50),
-        Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    
-    # 3. 학습 진행 (에포크를 조절하여 학습 강도 설정)
-    with st.spinner('학습 중... (약 30초 소요)'):
-        model.fit(X, y, epochs=20, batch_size=16, verbose=0)
-    
-    # 4. 모델 저장 (기존 h5 파일 덮어쓰기)
-    model.save('ai_trader_lstm.h5')
-    st.success("✅ 재학습 완료! 모델이 최신 상태로 업데이트되었습니다.")
-    st.rerun() # 앱 재시작하여 새 모델 로드
-
-# --- [UI 부분] 사이드바 또는 상단에 버튼 추가 ---
+# ==========================================
+# [사이드바 설정] 
+# ==========================================
 st.sidebar.title("⚙️ 설정 및 관리")
 if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
-    # 최신 데이터를 더 많이 가져와서 학습 (예: 500개)
-    training_df = get_analysis_data(st.session_state.tf) 
+    tf_current = st.session_state.get('tf', '1h')
+    training_df = get_analysis_data(tf_current) 
     if training_df is not None:
-        retrain_model(training_df)
+        with st.spinner("최신 데이터로 재학습 중입니다..."):
+            m_path = f"ai_trader_lstm_{st.session_state.get('tf_name', '1h')}.keras"
+            if os.path.exists(m_path): os.remove(m_path)
+        st.success("✅ 모델 초기화 완료! 메인 화면을 갱신하면 자동 재학습됩니다.")
+        st.rerun()
 
 # ==========================================
 # [메인 UI] 대시보드 렌더링
 # ==========================================
 st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
 
-# 1. 괄호와 문법을 수정한 경고문 (간격을 -10px로 약간 완화했습니다)
+# --- [수정 포인트] 경고문 위치 ---
 st.markdown("""
     <p style='font-size: 0.85rem; color: #FFA500; margin-top: -10px; margin-bottom: 15px; font-weight: bold;'>
         ※ 면책조항: 본 시스템의 예측은 참고용이며, 모든 투자 결정과 책임은 사용자 본인에게 있습니다.
     </p>
     """, unsafe_allow_html=True)
 
-# 2. 분석 시간 표시
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 3. 세션 상태 초기화 및 컬럼 생성 (괄호 닫기 완료!)
-if 'tf' not in st.session_state: 
-    st.session_state.tf, st.session_state.tf_name = "1h", "1시간"
+if 'tf' not in st.session_state:
+    st.session_state.tf, st.session_state.tf_name = "1h", "1h"
 
-c1, c2, c3 = st.columns(3) # <-- 여기에 괄호 ')'가 빠져있었습니다!
-
-# [최신 표준 반영] use_container_width=True 대신 width='stretch' 사용 (경고 해결)
+c1, c2, c3 = st.columns(3)
 if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
-if c2.button("4시간 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
-if c3.button("1일 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
+if c2.button("4시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
+if c3.button("1일 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
 
 df = get_analysis_data(st.session_state.tf)
 if df is not None:
-    with st.spinner(f'{st.session_state.tf_name} 기준 다변량 LSTM 모델을 로딩/분석 중입니다...'):
+    with st.spinner(f'{st.session_state.tf_name} 기준 AI 분석 중...'):
         pred = predict_next_price(df, st.session_state.tf_name)
     
     cur = df['Close'].iloc[-1]
     m1, m2, m3 = st.columns(3)
-    m1.metric("현재가 (Close)", f"${cur:,.1f}")
-    m2.metric(f"다음 캔들 예측가", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
+    m1.metric("현재가", f"${cur:,.1f}")
+    m2.metric("다음 예측가", f"${pred:,.1f}", f"{pred-cur:+.1f}$")
     m3.metric("현재 RSI", f"{df['RSI'].iloc[-1]:.1f}")
     
-    # AI 브리핑 출력
-    briefing_content = get_ai_briefing(df[['Close', 'Volume', 'RSI']].tail(5).to_json(), pred, st.session_state.tf_name)
-    st.markdown(f"""
-        <div class="briefing-box">
-            <strong>💬 AI 참모 실시간 전략 브리핑</strong><br><br>
-            {briefing_content}
-        </div>
-        """, unsafe_allow_html=True)
+    briefing = get_ai_briefing(df[['Close', 'Volume', 'RSI']].tail(5).to_json(), pred, st.session_state.tf_name)
+    st.markdown(f'<div class="briefing-box"><strong>💬 AI 전략 브리핑</strong><br><br>{briefing}</div>', unsafe_allow_html=True)
     
-    # 차트 그리기
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
     fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="BTC"), row=1, col=1)
     fig.add_trace(go.Scatter(x=df['Date'], y=df['MA20'], name='MA20', line=dict(color='yellow', width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', line=dict(color='#00FFA3')), row=2, col=1)
-    
-    # RSI 과매수/과매도 기준선 추가
-    fig.add_hline(y=70, line_dash="dot", row=2, col=1, line_color="red")
-    fig.add_hline(y=30, line_dash="dot", row=2, col=1, line_color="blue")
-    
     fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=30, b=0))
-    
-    # [최신 표준 반영] 차트 폭 설정 수정
     st.plotly_chart(fig, use_container_width=True)
