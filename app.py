@@ -136,7 +136,8 @@ st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
 st.caption("⚠️ 본 AI 예측은 과거 데이터를 기반으로 한 통계적 확률이며, 투자 결과에 대한 법적 책임을 지지 않습니다.")
 
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
-st.markdown("---")if 'tf' not in st.session_state:
+st.markdown("---")
+if 'tf' not in st.session_state:
     st.session_state.tf, st.session_state.tf_name = "1h", "1h"
 
 c1, c2, c3 = st.columns(3)
