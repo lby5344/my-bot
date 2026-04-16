@@ -196,6 +196,12 @@ if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width
 # [메인 UI] 대시보드 렌더링
 # ==========================================
 st.title("🤖 AI 비트코인 참모 (Multivariate LSTM v5.1)")
+# 폰트 크기를 조절하고 약간 흐릿한 오렌지색으로 경고 느낌 부여
+st.markdown("""
+    <p style='font-size: 0.85rem; color: #FFA500; margin-top: -15px; margin-bottom: 20px;'>
+        ※ 면책조항: 본 시스템의 예측은 참고용이며, 모든 투자 결정과 책임은 사용자 본인에게 있습니다.
+    </p>
+    """, unsafe_allow_html=True)
 st.markdown(f"<p class='time-display'>🕒 현재 분석 시간: {now_kst} (KST)</p>", unsafe_allow_html=True)
 st.markdown("---")
 
