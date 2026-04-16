@@ -153,20 +153,19 @@ def predict_next_price(df, tf_name):
     return predicted_price
 
 # --- [추가] 모델 재학습 함수 ---
-def retrain_model(df):
-    st.info("🔄 최신 데이터를 바탕으로 AI 모델 재학습을 시작합니다. 잠시만 기다려 주세요...")
-    
-    # 1. 데이터 준비 (최근 200개 데이터 사용)
-    data = df[['Close']].values
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
+# 기존 retrain_model 함수는 삭제!
 
-    X, y = [], []
-    for i in range(10, len(scaled_data)):
-        X.append(scaled_data[i-10:i, 0])
-        y.append(scaled_data[i, 0])
-    X, y = np.array(X), np.array(y)
-    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+if st.sidebar.button("♻️ AI 모델 재학습 (Retrain)", use_container_width=True):
+    training_df = get_analysis_data(st.session_state.tf) 
+    if training_df is not None:
+        with st.spinner("최신 데이터로 재학습 중입니다..."):
+            # 기존에 있던 모델 파일을 삭제하면, 
+            # predict_next_price 함수가 다음 번에 실행될 때 알아서 새 모델을 훈련시킵니다.
+            model_path = f"ai_trader_lstm_{st.session_state.tf_name}.keras"
+            if os.path.exists(model_path):
+                os.remove(model_path)
+        st.success("✅ 모델 초기화 완료! 메인 화면을 갱신하면 3변수 기반으로 자동 재학습됩니다.")
+        st.rerun()
 
     # 2. 모델 구성 및 학습 (기존 모델이 있으면 가중치 유지, 없으면 신규 생성)
     model = Sequential([
@@ -204,7 +203,7 @@ if 'tf' not in st.session_state: st.session_state.tf, st.session_state.tf_name =
 c1, c2, c3 = st.columns(3)
 
 # [최신 표준 반영] use_container_width=True 대신 width='stretch' 사용 (경고 해결)
-if c1.button("1시간 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
+if c1.button("1시간 분석", use_container_width=True): st.session_state.tf, st.session_state.tf_name = "1h", "1h"
 if c2.button("4시간 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "4h", "4h"
 if c3.button("1일 분석", width='stretch'): st.session_state.tf, st.session_state.tf_name = "1d", "1d"
 
@@ -241,4 +240,4 @@ if df is not None:
     fig.update_layout(template='plotly_dark', xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=30, b=0))
     
     # [최신 표준 반영] 차트 폭 설정 수정
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, use_container_width=True)
